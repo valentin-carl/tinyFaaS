@@ -117,7 +117,7 @@ func EncodeDir(functionDirPath string) (string, error) {
 		}
 	}
 
-	// close the reader
+	// close the writer
 	err = writer.Close()
 	if err != nil {
 		return "", err
