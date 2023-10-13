@@ -5,6 +5,7 @@ go 1.20
 require (
 	github.com/docker/docker v24.0.2+incompatible
 	github.com/google/uuid v1.3.0
+	github.com/mariomac/gostream v0.8.1
 	github.com/pfandzelter/go-coap v0.1.0
 	google.golang.org/grpc v1.53.0
 	google.golang.org/protobuf v1.31.0
@@ -28,6 +29,7 @@ require (
 	github.com/opencontainers/runc v1.1.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
+	golang.org/x/exp v0.0.0-20220328175248-053ad81199eb // indirect
 	golang.org/x/mod v0.9.0 // indirect
 	golang.org/x/net v0.8.0 // indirect
 	golang.org/x/sys v0.7.0 // indirect

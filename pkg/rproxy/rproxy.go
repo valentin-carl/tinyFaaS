@@ -30,6 +30,7 @@ func New() *RProxy {
 	}
 }
 
+// adds a new function to hosts map
 func (r *RProxy) Add(name string, ips []string) error {
 	if len(ips) == 0 {
 		return fmt.Errorf("no ips given")
@@ -38,6 +39,7 @@ func (r *RProxy) Add(name string, ips []string) error {
 	r.hl.Lock()
 	defer r.hl.Unlock()
 
+	// TODO why is this commented out?
 	// if function exists, we should update!
 	// if _, ok := r.hosts[name]; ok {
 	// 	return fmt.Errorf("function already exists")
@@ -47,6 +49,7 @@ func (r *RProxy) Add(name string, ips []string) error {
 	return nil
 }
 
+// removes a function
 func (r *RProxy) Del(name string) error {
 	r.hl.Lock()
 	defer r.hl.Unlock()

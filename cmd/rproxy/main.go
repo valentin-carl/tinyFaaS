@@ -67,6 +67,7 @@ func main() {
 
 	server := http.NewServeMux()
 
+	// this is used when the manager tells the rproxy about a new function
 	server.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != "POST" {
 			w.WriteHeader(http.StatusMethodNotAllowed)

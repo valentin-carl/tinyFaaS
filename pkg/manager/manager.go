@@ -231,6 +231,7 @@ func (ms *ManagementService) Wipe() error {
 
 	return nil
 }
+
 func (ms *ManagementService) Delete(name string) error {
 
 	fh, ok := ms.functionHandlers[name]

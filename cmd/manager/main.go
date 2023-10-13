@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"github.com/OpenFogStack/tinyFaaS/pkg/cluster"
 	"io"
 	"log"
 	"net/http"
@@ -30,6 +31,12 @@ type server struct {
 }
 
 func main() {
+
+	// necessary to use in cluster handler without causing circular imports
+	err := os.Setenv("CONFIG_PORT", strconv.Itoa(ConfigPort))
+	if err != nil {
+		panic(err)
+	}
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetPrefix("manager: ")
@@ -81,6 +88,10 @@ func main() {
 	case "docker":
 		log.Println("using docker backend")
 		tfBackend = docker.New(id)
+		// TODO add cluster backend
+	case "cluster":
+		log.Println("using cluster backend")
+		tfBackend = cluster.New(id)
 	default:
 		log.Fatalf("invalid backend %s", backend)
 	}
@@ -147,6 +158,7 @@ func main() {
 	r.HandleFunc("/wipe", s.wipeHandler)
 	r.HandleFunc("/logs", s.logsHandler)
 	r.HandleFunc("/uploadURL", s.urlUploadHandler)
+	r.HandleFunc("/register", s.register)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -390,4 +402,39 @@ func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
 	// return success
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, res)
+}
+
+// In cluster mode, other tinyFaaS instances can be registered at the main node.
+// The request needs a header `endpoint`, which will be stored and used to
+// communicate with the to-be-registered node.
+func (s *server) register(w http.ResponseWriter, r *http.Request) {
+
+	// ensure is post request
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// read relevant headers
+	ip := r.Header.Get("nodeip")
+	managerPort := r.Header.Get("managerport")
+	rproxyPort := r.Header.Get("rproxyport")
+	mp, e1 := strconv.Atoi(managerPort)
+	rp, e2 := strconv.Atoi(rproxyPort)
+	if ip == "" || managerPort == "" || rproxyPort == "" || e1 != nil || e2 != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// TODO check if already registered => error
+
+	// store node info
+	cluster.Lock.Lock()
+	cluster.Register(ip, mp, rp)
+	cluster.Lock.Unlock()
+
+	// TODO if functions exist, upload all to the new node
+
+	// respond positively to request
+	w.WriteHeader(http.StatusAccepted)
 }

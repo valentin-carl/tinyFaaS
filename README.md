@@ -184,3 +184,15 @@ For example, to use `6000` as the port for the CoAP and deactivate GRPC, run the
 ```bash
 docker run --env COAP_PORT=6000 --env GRPC_PORT=-1 -v /var/run/docker.sock:/var/run/docker.sock -p 8080:8080 --name tinyfaas-mgmt -d tinyfaas-mgmt tinyfaas-mgmt
 ```
+
+### Running a TinyFaaS Cluster
+
+- Tell TF to use the cluster backend instead of docker
+```shell
+export TF_BACKEND=cluster
+```
+
+- Add nodes to cluster
+
+Caveats
+- When writing a function, dont use subdirectories (or rewrite the zip function 😃)
