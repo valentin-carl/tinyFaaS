@@ -41,6 +41,8 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetPrefix("manager: ")
 
+	// todo also set this up for ConfigPort and RProxyConfigPort
+
 	ports := map[string]int{
 		"coap": 5683,
 		"http": 8000,

@@ -21,7 +21,7 @@ type clusterHandler struct {
 	functionName string
 	environment  string
 	nThreads     int
-	endpoints    []Node
+	nodes        []Node            // keep a slice of known (meaning known to the handler) nodes so the refresh only deploys at nodes that don't have this function already
 	functionCode string            // TODO add function code here? is there a better way?
 	envs         map[string]string // forward environment variables to nodes for docker containers (?)
 }
@@ -38,54 +38,68 @@ func New(tinyFaaSID string) *ClusterBackend {
 
 func (cb *ClusterBackend) Create(name string, env string, threads int, filedir string, envs map[string]string) (manager.Handler, error) {
 
-	// prepare function to be sent => zip etc.
-	// for all node ips
-	//	send POST to /upload
-
-	// store the function here *somehow* to later send it to the nodes
-	// needs to be in the same format that upload.sh creates because the
-	// request will be similar
-	// in dh.Start()
-
+	// get the function source code as encoded string
 	functionSource, err := util.EncodeDir(filedir)
 	if err != nil {
 		log.Println("error while trying to encode the function code:", err.Error())
 		return nil, err
 	}
 
-	return nil, nil
+	// create new function handler
+	fh := &clusterHandler{
+		functionName: name,
+		environment:  env,
+		nThreads:     1,
+		nodes:        make([]Node, 0),
+		functionCode: functionSource,
+		envs:         envs,
+	}
+
+	return fh, nil
 }
 
 func (cb *ClusterBackend) Stop() error {
 	return nil // TODO is there a way to remotely tell the nodes to shut down? If not, build one
 }
 
-func (dh *clusterHandler) IPs() []string {
+func (ch *clusterHandler) IPs() []string {
 	return stream.
-		Map(stream.OfSlice(dh.endpoints),
+		Map(stream.OfSlice(ch.nodes),
 			func(n Node) string {
 				return n.ip
 			}).
 		ToSlice()
 }
 
-func (dh *clusterHandler) Start() error {
-	// todo send the function to all nodes => see upload.sh for how to send the code via http
-	// for that to work, the type probably also needs all the info about the function
+// Start checks for new nodes and sends all currently registered nodes the function
+func (ch *clusterHandler) Start() error {
+
+	// in case new nodes were added between creating this handler and starting it
+	ch.refresh()
+
+	// send function to tinyfaas nodes
+	for _, n := range ch.nodes {
+		err := ch.uploadToNode(n)
+		if err != nil {
+			log.Printf("Error occurred while trying to upload function '%s' to node %s: %s", ch.functionName, n.ip, err.Error())
+			return err // TODO is it better to return immediately or try the other nodes too?
+		}
+	}
+
 	return nil
 }
 
-func (dh *clusterHandler) Destroy() error {
-	// send request to all nodes to destroy function with name = dh.functionName
+func (ch *clusterHandler) Destroy() error {
+	// send request to all nodes to destroy function with name = ch.functionName
 	return nil
 }
 
 // Query all nodes for logs for this handler's function an return them
-func (dh *clusterHandler) Logs() (io.Reader, error) {
+func (ch *clusterHandler) Logs() (io.Reader, error) {
 
 	var logs bytes.Buffer
 
-	for _, ip := range dh.endpoints {
+	for _, ip := range ch.nodes {
 		// request logs from node
 		// TODO this assumes that all tinyfaas nodes have the same ports config, which doesn't need to be true
 		managementPort := os.Getenv("CONFIG_PORT")
@@ -108,7 +122,7 @@ func (dh *clusterHandler) Logs() (io.Reader, error) {
 
 		// filter lines by function name
 		for _, line := range lines {
-			if match, _ := regexp.MatchString(fmt.Sprintf("function=%s", dh.functionName), line); match {
+			if match, _ := regexp.MatchString(fmt.Sprintf("function=%s", ch.functionName), line); match {
 				logs.WriteString(fmt.Sprintf("%s\n", line))
 			}
 		}
@@ -117,47 +131,62 @@ func (dh *clusterHandler) Logs() (io.Reader, error) {
 	return &logs, nil
 }
 
-// Refresh is used when this function handler is already running (i.e. Create & Start were already called).
-// It compares endpoints stored in `endpoints` to the endpoints stored in the cluster registry.
+// refresh is used when this function handler is already running (i.e. Create & Start were already called).
+// It compares nodes stored in `nodes` to the nodes stored in the cluster registry.
 // The function is then sent to the new nodes.
-func (dh *clusterHandler) Refresh() {
+func (ch *clusterHandler) refresh() []Node {
 
-	var deployTo []Node
+	var new []Node
 
 	// find new nodes
 	nodes := GetNodes()
 Outer:
-	for _, oldNode := range dh.endpoints {
+	for _, oldNode := range ch.nodes {
 		for _, node := range nodes {
 			if oldNode.ip == node.ip {
 				continue Outer
 			}
 		}
-		deployTo = append(deployTo, oldNode)
+		new = append(new, oldNode)
 	}
 
-	// send post requests to all new nodes /upload
-	if len(deployTo) == 0 {
-		log.Printf("no new nodes to deploy function %s to\n", dh.functionName)
+	// if there are any, append to ch.nodes
+	if len(new) != 0 {
+		ch.nodes = append(ch.nodes, new...)
 	}
+
+	return new
+}
+
+func (ch *clusterHandler) RefreshAndUpload() {
+
+	deployTo := ch.refresh()
+
+	// if there are no new nodes, just stop here
+	if len(deployTo) == 0 {
+		log.Printf("no new nodes to deploy function %s to\n", ch.functionName)
+		return
+	}
+
+	// send the function to all new nodes
 	for _, ep := range deployTo {
-		err := dh.uploadToNode(ep)
+		err := ch.uploadToNode(ep)
 		if err != nil {
 			log.Printf("error while trying to upload function to node %s: %s\n", ep.ip, err.Error())
 		}
 	}
 }
 
-func (dh *clusterHandler) uploadToNode(node Node) error {
+func (ch *clusterHandler) uploadToNode(node Node) error {
 
 	// create the function body
 	var body []byte
 	zip := map[string]any{
-		"name":    dh.functionName,
-		"env":     dh.environment,
-		"threads": dh.nThreads,
-		"zip":     dh.functionCode,
-		"envs":    dh.envs,
+		"name":    ch.functionName,
+		"env":     ch.environment,
+		"threads": ch.nThreads,
+		"zip":     ch.functionCode,
+		"envs":    ch.envs,
 	}
 	body, err := json.Marshal(zip)
 	if err != nil {
