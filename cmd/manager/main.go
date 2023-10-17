@@ -495,6 +495,7 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 	timeout := r.Header.Get("timeout")
 	if timeout == "" {
 		log.Println("no timeout header, defaulting to 5 sec")
+		timeout = "5"
 	}
 	timeoutInt, err := strconv.Atoi(timeout)
 	if err != nil {
