@@ -59,6 +59,9 @@ func New(id string, rproxyListenAddress string, rproxyPort map[string]int, rprox
 
 func (ms *ManagementService) createFunction(name string, env string, threads int, funczip []byte, subfolderPath string, envs map[string]string) (string, error) {
 
+	// store function to use in cluster backend
+	StoreFunction(name, base64.StdEncoding.EncodeToString(funczip))
+
 	// only allow alphanumeric characters
 	if !util.IsAlphaNumeric(name) {
 		return "", fmt.Errorf("function name %s contains non-alphanumeric characters", name)
@@ -129,6 +132,8 @@ func (ms *ManagementService) createFunction(name string, env string, threads int
 	// create new function handler
 	ms.functionHandlersMutex.Lock()
 	defer ms.functionHandlersMutex.Unlock()
+
+	log.Printf("calling backend.Create with\n\tname=%s\n\tenv=%s\n\tthreads=%d\n\tp=%s\n\tenvs=...", name, env, threads, p)
 
 	fh, err := ms.backend.Create(name, env, threads, p, envs)
 
@@ -298,6 +303,9 @@ func (ms *ManagementService) Upload(name string, env string, threads int, zipped
 		return "", err
 	}
 
+	// todo dont forget envs
+	log.Printf("input for function handler: \n\tname=%s\n\tenv=%s\n\tthreads=%d\n\tzipped=%s\n\t", name, env, threads, zipped)
+
 	// create function handler
 	n, err := ms.createFunction(name, env, threads, zip, "", envs)
 
@@ -363,4 +371,27 @@ func (ms *ManagementService) Stop() error {
 	}
 
 	return ms.backend.Stop()
+}
+
+// todo better code structure (this was supposed to be in registry but cause circular dependencies)
+// => move registry to new package
+// store the function code here to avoid the zip/unzipping process
+var functions = make(map[string]string)
+var flock = &sync.Mutex{}
+
+func GetFunction(name string) (string, error) {
+	flock.Lock()
+	defer flock.Unlock()
+	function := functions[name]
+	if function == "" {
+		return "", errors.New(fmt.Sprintf("no such function (name %s)", name))
+	}
+	return function, nil
+}
+
+func StoreFunction(name, code string) {
+	log.Printf("Store function %s with code\n%s\n", name, code)
+	flock.Lock()
+	functions[name] = code
+	flock.Unlock()
 }
