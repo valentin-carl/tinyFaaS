@@ -2,6 +2,7 @@ package util
 
 import (
 	"archive/zip"
+	"bufio"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -93,6 +94,7 @@ func EncodeDir(functionDirPath string) (string, error) {
 	fmt.Println(archive.Name())
 
 	// iterate over files in dir and copy into zip
+	// todo this probably includes hidden files (like .DS_Store) in the zip, which breaks the upload to other nodes
 	dir, _ := os.Open(functionDirPath)
 	defer dir.Close()
 	filenames, _ := dir.ReadDir(-1)
@@ -129,4 +131,36 @@ func EncodeDir(functionDirPath string) (string, error) {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(archiveByes), nil
+}
+
+func GetBase64(zipPath string) (string, error) {
+
+	// todo important: the zip MUST only contain fn.py and requirements.txt, no hidden files (like .DS_Store) allowed!!!
+
+	// open file
+	file, err := os.Open(zipPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	// get file size
+	stats, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+	log.Println("zip file size:", stats.Size())
+
+	// read file into byte slice
+	bytes := make([]byte, stats.Size())
+	bytesRead, err := bufio.NewReader(file).Read(bytes)
+	if err != nil {
+		return "", err
+	}
+	log.Println("bytes read:", bytesRead)
+
+	// encode
+	encoded := base64.StdEncoding.EncodeToString(bytes)
+
+	return encoded, nil
 }
