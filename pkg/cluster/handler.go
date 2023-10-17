@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/OpenFogStack/tinyFaaS/pkg/manager"
-	"github.com/OpenFogStack/tinyFaaS/pkg/util"
 	"github.com/mariomac/gostream/stream"
 	"io"
 	"log"
@@ -36,24 +35,26 @@ func New(tinyFaaSID string) *ClusterBackend {
 	}
 }
 
-func (cb *ClusterBackend) Create(name string, env string, threads int, filedir string, envs map[string]string) (manager.Handler, error) {
+func (cb *ClusterBackend) Create(name string, env string, threads int, dirPath string, envs map[string]string) (manager.Handler, error) {
 
-	// get the function source code as encoded string
-	functionSource, err := util.EncodeDir(filedir)
+	log.Printf("creating cluster function handler for %s\n", name)
+
+	zip64, err := manager.GetFunction(name)
 	if err != nil {
-		log.Println("error while trying to encode the function code:", err.Error())
-		return nil, err
+		return nil, errors.New(fmt.Sprintf("Unable to read encoded function code for %s", name))
 	}
 
-	// create new function handler
+	// create & return function handler
 	fh := &clusterHandler{
 		functionName: name,
 		environment:  env,
-		nThreads:     1,
+		nThreads:     threads,
 		nodes:        make([]Node, 0),
-		functionCode: functionSource,
+		functionCode: zip64,
 		envs:         envs,
 	}
+
+	log.Println("created function handler")
 
 	return fh, nil
 }
@@ -66,7 +67,7 @@ func (ch *clusterHandler) IPs() []string {
 	return stream.
 		Map(stream.OfSlice(ch.nodes),
 			func(n Node) string {
-				return n.ip
+				return n.Ip
 			}).
 		ToSlice()
 }
@@ -81,7 +82,7 @@ func (ch *clusterHandler) Start() error {
 	for _, n := range ch.nodes {
 		err := ch.uploadToNode(n)
 		if err != nil {
-			log.Printf("Error occurred while trying to upload function '%s' to node %s: %s", ch.functionName, n.ip, err.Error())
+			log.Printf("Error occurred while trying to upload function '%s' to node %s: %s", ch.functionName, n.Ip, err.Error())
 			return err // TODO is it better to return immediately or try the other nodes too?
 		}
 	}
@@ -143,7 +144,7 @@ func (ch *clusterHandler) refresh() []Node {
 Outer:
 	for _, oldNode := range ch.nodes {
 		for _, node := range nodes {
-			if oldNode.ip == node.ip {
+			if oldNode.Ip == node.Ip {
 				continue Outer
 			}
 		}
@@ -172,7 +173,7 @@ func (ch *clusterHandler) RefreshAndUpload() {
 	for _, ep := range deployTo {
 		err := ch.uploadToNode(ep)
 		if err != nil {
-			log.Printf("error while trying to upload function to node %s: %s\n", ep.ip, err.Error())
+			log.Printf("error while trying to upload function to node %s: %s\n", ep.Ip, err.Error())
 		}
 	}
 }
@@ -194,7 +195,7 @@ func (ch *clusterHandler) uploadToNode(node Node) error {
 	}
 
 	// create the request
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s:%d/upload", node.ip, node.managerPort), bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s:%d/upload", node.Ip, node.ManagerPort), bytes.NewReader(body))
 	log.Println("sending request:", req.Header, req.Body)
 	if err != nil {
 		return err
@@ -206,7 +207,7 @@ func (ch *clusterHandler) uploadToNode(node Node) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("node %s response: %s\n", node.ip, res.Header)
+	log.Printf("node %s response: %s\n", node.Ip, res.Header)
 
 	return nil
 }

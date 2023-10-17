@@ -9,12 +9,12 @@ import (
 // The slice is in its own file to prevent circular dependencies between cmd.manager.main.go
 // and pkg.cluster.handler.go
 var nodes []Node
-var Lock = &sync.Mutex{}
+var lock = &sync.Mutex{}
 
 type Node struct {
-	ip          string
-	managerPort int
-	rproxyPort  int
+	Ip          string `json:"ip"`
+	ManagerPort int    `json:"manager_port"`
+	RproxyPort  int    `json:"rproxy_port"`
 }
 
 func NewNode(ip string, managerPort, rproxyPort int) *Node {
@@ -26,10 +26,10 @@ func NewNode(ip string, managerPort, rproxyPort int) *Node {
 }
 
 func Register(endpoint string, managerPort, rproxyPort int) {
-	Lock.Lock()
+	lock.Lock()
 	nodes = append(nodes, *NewNode(endpoint, managerPort, rproxyPort))
-	Lock.Unlock()
-	log.Println("tinyfaas node %s:(%d/%d) registered", endpoint, managerPort, rproxyPort)
+	lock.Unlock()
+	log.Printf("tinyfaas node %s:(%d/%d) registered\n", endpoint, managerPort, rproxyPort)
 }
 
 func GetNodes() []Node {
