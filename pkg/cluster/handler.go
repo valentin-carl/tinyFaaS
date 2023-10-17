@@ -75,11 +75,18 @@ func (ch *clusterHandler) IPs() []string {
 // Start checks for new nodes and sends all currently registered nodes the function
 func (ch *clusterHandler) Start() error {
 
+	log.Printf("cluster fh started for function %s\n", ch.functionName)
+
 	// in case new nodes were added between creating this handler and starting it
 	ch.refresh()
 
+	log.Printf("fh %s knows about %d nodes\n", ch.functionName, len(ch.nodes))
+
 	// send function to tinyfaas nodes
 	for _, n := range ch.nodes {
+
+		log.Printf("Uploading %s to %s\n", ch.functionName, n.Ip)
+
 		err := ch.uploadToNode(n)
 		if err != nil {
 			log.Printf("Error occurred while trying to upload function '%s' to node %s: %s", ch.functionName, n.Ip, err.Error())
@@ -132,33 +139,39 @@ func (ch *clusterHandler) Logs() (io.Reader, error) {
 	return &logs, nil
 }
 
-// refresh is used when this function handler is already running (i.e. Create & Start were already called).
+// Refresh is used when this function handler is already running (i.e. Create & Start were already called).
 // It compares nodes stored in `nodes` to the nodes stored in the cluster registry.
-// The function is then sent to the new nodes.
 func (ch *clusterHandler) refresh() []Node {
+
+	log.Printf("fh %s knows about %d nodes\n", ch.functionName, len(ch.nodes))
 
 	var new []Node
 
 	// find new nodes
 	nodes := GetNodes()
 Outer:
-	for _, oldNode := range ch.nodes {
-		for _, node := range nodes {
+	for _, node := range nodes {
+		for _, oldNode := range ch.nodes {
 			if oldNode.Ip == node.Ip {
 				continue Outer
 			}
 		}
-		new = append(new, oldNode)
+		new = append(new, node)
 	}
+
+	log.Printf("there are %d nodes in total\n", len(nodes))
 
 	// if there are any, append to ch.nodes
 	if len(new) != 0 {
 		ch.nodes = append(ch.nodes, new...)
 	}
 
+	log.Printf("found %d nodes previously unknown to the fh\n", len(new))
+
 	return new
 }
 
+// The function is then sent to the new nodes.
 func (ch *clusterHandler) RefreshAndUpload() {
 
 	deployTo := ch.refresh()
@@ -189,13 +202,26 @@ func (ch *clusterHandler) uploadToNode(node Node) error {
 		"zip":     ch.functionCode,
 		"envs":    ch.envs,
 	}
+
+	// Empty slices and nil slices behave differently when marshalled and unmarshalled.
+	// Sending a slice of length 0 to the nodes would result in an error, because 'envs'
+	// couldn't be read into the struct in s.upload (in manager::main).
+	// Replacing this with nil resolves the issue.
+	if len(ch.envs) == 0 {
+		zip["envs"] = nil
+	}
+
 	body, err := json.Marshal(zip)
 	if err != nil {
 		return err
 	}
 
 	// create the request
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s:%d/upload", node.Ip, node.ManagerPort), bytes.NewReader(body))
+	req, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("http://%s:%d/upload", node.Ip, node.ManagerPort),
+		bytes.NewReader(body),
+	)
 	log.Println("sending request:", req.Header, req.Body)
 	if err != nil {
 		return err
