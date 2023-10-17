@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/OpenFogStack/tinyFaaS/pkg/docker"
 	"github.com/OpenFogStack/tinyFaaS/pkg/manager"
@@ -78,7 +79,10 @@ func main() {
 	id := uuid.New().String()
 
 	// find backend
+	// todo figure out why this doesnt see the value i set
 	backend, ok := os.LookupEnv("TF_BACKEND")
+	backend = "cluster"
+	log.Println("backend =", backend)
 
 	if !ok {
 		backend = "docker"
@@ -160,7 +164,9 @@ func main() {
 	r.HandleFunc("/wipe", s.wipeHandler)
 	r.HandleFunc("/logs", s.logsHandler)
 	r.HandleFunc("/uploadURL", s.urlUploadHandler)
-	r.HandleFunc("/register", s.register)
+	r.HandleFunc("/register", s.register) // todo rename registerHandler
+	r.HandleFunc("/listnodes", s.listNodesHandler)
+	r.HandleFunc("/echo", s.echoHandler)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -411,6 +417,8 @@ func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
 // communicate with the to-be-registered node.
 func (s *server) register(w http.ResponseWriter, r *http.Request) {
 
+	log.Println("New register request")
+
 	// ensure is post request
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusBadRequest)
@@ -418,25 +426,124 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// read relevant headers
-	ip := r.Header.Get("nodeip")
-	managerPort := r.Header.Get("managerport")
-	rproxyPort := r.Header.Get("rproxyport")
+	ip := r.Header.Get("Nodeip")
+	managerPort := r.Header.Get("Managerport")
+	rproxyPort := r.Header.Get("Rproxyport")
+
+	log.Printf("trying to register %s %s %s\n", ip, managerPort, rproxyPort)
+
 	mp, e1 := strconv.Atoi(managerPort)
+	if e1 != nil {
+		log.Println("couldnt read managerport")
+		return
+	}
 	rp, e2 := strconv.Atoi(rproxyPort)
+	if e2 != nil {
+		log.Println("couldnt read rproxyport")
+		return
+	}
 	if ip == "" || managerPort == "" || rproxyPort == "" || e1 != nil || e2 != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
 	// TODO check if already registered => error
+	// TODO check whether actual tinyfaas node
 
 	// store node info
-	cluster.Lock.Lock()
 	cluster.Register(ip, mp, rp)
-	cluster.Lock.Unlock()
 
 	// TODO if functions exist, upload all to the new node
 
 	// respond positively to request
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *server) listNodesHandler(w http.ResponseWriter, r *http.Request) {
+
+	nodes := cluster.GetNodes()
+	msg, err := json.Marshal(nodes)
+	log.Printf("nodes: %s\n", msg)
+	if err != nil {
+		fmt.Println("could not marshall nodes slice")
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "text/json")
+	_, err = w.Write(msg)
+	if err != nil {
+		log.Printf("Something went wrong while trying to write response body %s\n", err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+}
+
+func (s *server) echoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	x, _ := io.ReadAll(r.Body)
+	_, err := w.Write(x)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
+
+	// check for timeout header (default 5 sec)
+	timeout := r.Header.Get("timeout")
+	if timeout == "" {
+		log.Println("no timeout header, defaulting to 5 sec")
+	}
+	timeoutInt, err := strconv.Atoi(timeout)
+	if err != nil {
+		log.Printf("Problem with reading timeout header %s\n", timeout)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// store map with response time (/"request timeout")
+	nodes := cluster.GetNodes()
+	results := make(map[string]string)
+	client := http.Client{
+		Timeout: time.Duration(timeoutInt),
+	}
+	for _, node := range nodes {
+		url := fmt.Sprintf("http://%s:%d", node.Ip, node.ManagerPort)
+		log.Printf("sending ping to %s", url)
+		req, err := http.NewRequest(http.MethodGet, url, strings.NewReader("hello world"))
+		if err != nil {
+			log.Printf("error building request for %s\n", url)
+			results[node.Ip] = "could not build request"
+			continue
+		}
+		start := time.Now()
+		res, err := client.Do(req)
+		end := time.Now()
+		if err != nil {
+			log.Printf("error occurred pinging %s\n", url)
+			results[node.Ip] = "error with request"
+			continue
+		}
+		log.Printf("ping result %s %s\n", url, res.Status)
+		requestDuration := end.Sub(start)
+		log.Printf("duration %s %s\n", url, requestDuration.String())
+		results[node.Ip] = requestDuration.String()
+	}
+
+	// return result
+	bodyJson, err := json.Marshal(results)
+	if err != nil {
+		log.Println("could marshall results")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	_, err = w.Write(bodyJson)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	} else {
+		w.WriteHeader(http.StatusOK)
+	}
 }
