@@ -36,12 +36,12 @@ type server struct {
 func main() {
 
 	// read the Config file if there is one, otherwise go back to default
-	config, err := util.LoadConfig()
+	Config, err := util.LoadConfig()
 	if err != nil {
 		log.Println("Using default config")
-		config = util.DefaultConfig
+		Config = util.DefaultConfig
 	} else {
-		log.Println("loaded config", config.RProxyConfigPort, config.ConfigPort, config.Ports)
+		log.Println("loaded config", Config.RProxyConfigPort, Config.ConfigPort, Config.Ports)
 	}
 
 	// necessary to use in cluster handler without causing circular imports
@@ -52,8 +52,6 @@ func main() {
 
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.SetPrefix("manager: ")
-
-	// todo also set this up for ConfigPort and RProxyConfigPort
 
 	ports := map[string]int{
 		"coap": Config.Ports.Coap,
@@ -476,7 +474,12 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	// TODO check whether actual tinyfaas node
 
 	// store node info
-	cluster.Register(ip, mp, rp)
+	err := cluster.Register(ip, mp, rp)
+	if err != nil {
+		log.Println("Node already registered")
+		w.WriteHeader(http.StatusForbidden)
+		return
+	}
 
 	// TODO if functions exist, upload all to the new node
 

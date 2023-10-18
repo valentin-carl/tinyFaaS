@@ -1,7 +1,9 @@
 package cluster
 
 import (
+	"errors"
 	"log"
+	"slices"
 	"sync"
 )
 
@@ -13,8 +15,8 @@ var lock = &sync.Mutex{}
 
 type Node struct {
 	Ip          string `json:"ip"`
-	ManagerPort int    `json:"manager_port"`
-	RproxyPort  int    `json:"rproxy_port"`
+	ManagerPort int    `json:"manager_port"` // todo is this used anywhere? if not, delete it
+	RproxyPort  int    `json:"rproxy_port"`  // todo is this used anywhere? if not, delete it
 }
 
 func NewNode(ip string, managerPort, rproxyPort int) *Node {
@@ -25,11 +27,23 @@ func NewNode(ip string, managerPort, rproxyPort int) *Node {
 	}
 }
 
-func Register(endpoint string, managerPort, rproxyPort int) {
+func Register(endpoint string, managerPort, rproxyPort int) error {
+
+	// avoid concurrent access to nodes slice
 	lock.Lock()
+	defer lock.Unlock()
+
+	// check whether node is already registered
+	if n := (Node{endpoint, managerPort, rproxyPort}); slices.Contains(nodes, n) {
+		msg := "this node is already registered"
+		log.Println(msg)
+		return errors.New(msg)
+	}
+
+	// register node
 	nodes = append(nodes, *NewNode(endpoint, managerPort, rproxyPort))
-	lock.Unlock()
 	log.Printf("tinyfaas node %s:(%d/%d) registered\n", endpoint, managerPort, rproxyPort)
+	return nil
 }
 
 func GetNodes() []Node {
