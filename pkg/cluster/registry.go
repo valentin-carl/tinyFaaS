@@ -49,3 +49,32 @@ func Register(endpoint string, managerPort, rproxyPort int) error {
 func GetNodes() []Node {
 	return nodes
 }
+
+func IsRegistered(ip string, mport, rport int) bool {
+	lock.Lock()
+	defer lock.Unlock()
+	return slices.Contains(nodes, Node{ip, mport, rport})
+}
+
+func DeleteNode(ip string, mport, rport int) error {
+	lock.Lock()
+	defer lock.Unlock()
+
+	// find node
+	index := -1
+	for i := range nodes {
+		if nodes[i] == (Node{ip, mport, rport}) {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return errors.New("no such node")
+	}
+
+	// delete it
+	nodes[index] = nodes[len(nodes)-1]
+	nodes[len(nodes)-1] = Node{}
+	nodes = nodes[:len(nodes)-1]
+	return nil
+}

@@ -178,6 +178,7 @@ func main() {
 	r.HandleFunc("/listnodes", s.listNodesHandler)
 	r.HandleFunc("/echo", s.echoHandler)
 	r.HandleFunc("/pingnodes", s.pingNodes)
+	r.HandleFunc("/deletenode", s.deleteNode)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -435,6 +436,7 @@ func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
 // In cluster mode, other tinyFaaS instances can be registered at the main node.
 // The request needs a header `endpoint`, which will be stored and used to
 // communicate with the to-be-registered node.
+// todo it might be better if the data is sent in the request body
 func (s *server) register(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("New register request")
@@ -470,7 +472,6 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO check if already registered => error
 	// TODO check whether actual tinyfaas node
 
 	// store node info
@@ -580,4 +581,40 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+}
+
+func (s *server) deleteNode(w http.ResponseWriter, r *http.Request) {
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// read relevant headers
+	ip := r.Header.Get("nodeip")
+	mportStr := r.Header.Get("managerport")
+	rportStr := r.Header.Get("rproxyport")
+	mport, e1 := strconv.Atoi(mportStr)
+	rport, e2 := strconv.Atoi(rportStr)
+	if ip == "" || mportStr == "" || rportStr == "" || e1 != nil || e2 != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	// check whether the node is actually registered
+	if !cluster.IsRegistered(ip, mport, rport) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// delete it
+	err := cluster.DeleteNode(ip, mport, rport)
+	if err != nil {
+		log.Println(err.Error())
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// success
+	w.WriteHeader(http.StatusOK)
 }
