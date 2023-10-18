@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/OpenFogStack/tinyFaaS/pkg/cluster"
+	"github.com/OpenFogStack/tinyFaaS/pkg/util"
 	"io"
 	"log"
 	"net/http"
@@ -20,9 +22,9 @@ import (
 	"github.com/google/uuid"
 )
 
+var Config util.Config
+
 const (
-	ConfigPort          = 8080
-	RProxyConfigPort    = 8081
 	RProxyListenAddress = ""
 	RProxyBin           = "./rproxy"
 )
@@ -33,8 +35,17 @@ type server struct {
 
 func main() {
 
+	// read the Config file if there is one, otherwise go back to default
+	config, err := util.LoadConfig()
+	if err != nil {
+		log.Println("Using default config")
+		config = util.DefaultConfig
+	} else {
+		log.Println("loaded config", config.RProxyConfigPort, config.ConfigPort, config.Ports)
+	}
+
 	// necessary to use in cluster handler without causing circular imports
-	err := os.Setenv("CONFIG_PORT", strconv.Itoa(ConfigPort))
+	err = os.Setenv("CONFIG_PORT", strconv.Itoa(Config.ConfigPort))
 	if err != nil {
 		panic(err)
 	}
@@ -45,9 +56,9 @@ func main() {
 	// todo also set this up for ConfigPort and RProxyConfigPort
 
 	ports := map[string]int{
-		"coap": 5683,
-		"http": 8000,
-		"grpc": 9000,
+		"coap": Config.Ports.Coap,
+		"http": Config.Ports.Http,
+		"grpc": Config.Ports.Grpc,
 	}
 
 	for p := range ports {
@@ -81,13 +92,14 @@ func main() {
 	// find backend
 	// todo figure out why this doesnt see the value i set
 	backend, ok := os.LookupEnv("TF_BACKEND")
-	backend = "cluster"
-	log.Println("backend =", backend)
 
 	if !ok {
 		backend = "docker"
 		log.Println("using default backend docker")
 	}
+
+	backend = "cluster"
+	log.Println("backend =", backend)
 
 	var tfBackend manager.Backend
 	switch backend {
@@ -106,11 +118,11 @@ func main() {
 		id,
 		RProxyListenAddress,
 		ports,
-		RProxyConfigPort,
+		Config.RProxyConfigPort,
 		tfBackend,
 	)
 
-	rproxyArgs := []string{fmt.Sprintf("%s:%d", RProxyListenAddress, RProxyConfigPort)}
+	rproxyArgs := []string{fmt.Sprintf("%s:%d", RProxyListenAddress, Config.RProxyConfigPort)}
 
 	for prot, port := range ports {
 		rproxyArgs = append(rproxyArgs, fmt.Sprintf("%s:%s:%d", prot, RProxyListenAddress, port))
@@ -167,6 +179,7 @@ func main() {
 	r.HandleFunc("/register", s.register) // todo rename registerHandler
 	r.HandleFunc("/listnodes", s.listNodesHandler)
 	r.HandleFunc("/echo", s.echoHandler)
+	r.HandleFunc("/pingnodes", s.pingNodes)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -197,7 +210,7 @@ func main() {
 
 	// start server
 	log.Println("starting HTTP server")
-	addr := fmt.Sprintf(":%d", ConfigPort)
+	addr := fmt.Sprintf(":%d", Config.ConfigPort)
 	err = http.ListenAndServe(addr, r)
 	if err != nil {
 		log.Fatal(err)
@@ -205,6 +218,8 @@ func main() {
 }
 
 func (s *server) uploadHandler(w http.ResponseWriter, r *http.Request) {
+
+	defer r.Body.Close()
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusBadRequest)
@@ -220,7 +235,14 @@ func (s *server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 		FunctionEnvs    []string `json:"envs"`
 	}{}
 
-	err := json.NewDecoder(r.Body).Decode(&d)
+	sttt, e := io.ReadAll(r.Body)
+	log.Println(string(sttt))
+	if e != nil {
+		log.Println(e.Error())
+	}
+
+	err := json.NewDecoder(bytes.NewReader(sttt)).Decode(&d)
+	//err := json.NewDecoder(r.Body).Decode(&d)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		log.Println(err)
@@ -426,19 +448,22 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// read relevant headers
-	ip := r.Header.Get("Nodeip")
-	managerPort := r.Header.Get("Managerport")
-	rproxyPort := r.Header.Get("Rproxyport")
+	log.Println(r.Header)
+	ip := r.Header.Get("nodeip")
+	managerPort := r.Header.Get("managerport")
+	rproxyPort := r.Header.Get("rproxyport")
 
 	log.Printf("trying to register %s %s %s\n", ip, managerPort, rproxyPort)
 
 	mp, e1 := strconv.Atoi(managerPort)
 	if e1 != nil {
 		log.Println("couldnt read managerport")
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 	rp, e2 := strconv.Atoi(rproxyPort)
 	if e2 != nil {
+		w.WriteHeader(http.StatusBadRequest)
 		log.Println("couldnt read rproxyport")
 		return
 	}
@@ -508,14 +533,14 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 	nodes := cluster.GetNodes()
 	results := make(map[string]string)
 	client := http.Client{
-		Timeout: time.Duration(timeoutInt),
+		Timeout: time.Duration(timeoutInt) * time.Second,
 	}
 	for _, node := range nodes {
-		url := fmt.Sprintf("http://%s:%d", node.Ip, node.ManagerPort)
+		url := fmt.Sprintf("http://%s:%d/echo", node.Ip, node.ManagerPort)
 		log.Printf("sending ping to %s", url)
-		req, err := http.NewRequest(http.MethodGet, url, strings.NewReader("hello world"))
+		req, err := http.NewRequest(http.MethodPost, url, strings.NewReader("hello world"))
 		if err != nil {
-			log.Printf("error building request for %s\n", url)
+			log.Printf("error building request for %s %s\n", url, err.Error())
 			results[node.Ip] = "could not build request"
 			continue
 		}
@@ -523,7 +548,7 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 		res, err := client.Do(req)
 		end := time.Now()
 		if err != nil {
-			log.Printf("error occurred pinging %s\n", url)
+			log.Printf("error occurred pinging %s %s\n", url, err.Error())
 			results[node.Ip] = "error with request"
 			continue
 		}
@@ -533,7 +558,14 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 		results[node.Ip] = requestDuration.String()
 	}
 
+	log.Println(results, len(results))
+
 	// return result
+	if len(results) == 0 {
+		log.Println("result is empty")
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	bodyJson, err := json.Marshal(results)
 	if err != nil {
 		log.Println("could marshall results")
@@ -544,7 +576,5 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
-	} else {
-		w.WriteHeader(http.StatusOK)
 	}
 }

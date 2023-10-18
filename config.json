@@ -1,0 +1,9 @@
+{
+  "ConfigPort": 8080,
+  "RProxyConfigPort": 8081,
+  "Ports": {
+    "coap": 5683,
+    "http": 8000,
+    "grpc": 9000
+  }
+}
