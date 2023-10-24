@@ -20,17 +20,17 @@ const (
 )
 
 type RProxy struct {
-	hosts map[string][]string
+	Hosts map[string][]string
 	hl    sync.RWMutex
 }
 
 func New() *RProxy {
 	return &RProxy{
-		hosts: make(map[string][]string),
+		Hosts: make(map[string][]string),
 	}
 }
 
-// adds a new function to hosts map
+// adds a new function to Hosts map
 func (r *RProxy) Add(name string, ips []string) error {
 	if len(ips) == 0 {
 		return fmt.Errorf("no ips given")
@@ -41,11 +41,11 @@ func (r *RProxy) Add(name string, ips []string) error {
 
 	// TODO why is this commented out?
 	// if function exists, we should update!
-	// if _, ok := r.hosts[name]; ok {
+	// if _, ok := r.Hosts[name]; ok {
 	// 	return fmt.Errorf("function already exists")
 	// }
 
-	r.hosts[name] = ips
+	r.Hosts[name] = ips
 	return nil
 }
 
@@ -54,17 +54,17 @@ func (r *RProxy) Del(name string) error {
 	r.hl.Lock()
 	defer r.hl.Unlock()
 
-	if _, ok := r.hosts[name]; !ok {
+	if _, ok := r.Hosts[name]; !ok {
 		return fmt.Errorf("function not found")
 	}
 
-	delete(r.hosts, name)
+	delete(r.Hosts, name)
 	return nil
 }
 
 func (r *RProxy) Call(name string, payload []byte, async bool) (Status, []byte) {
 
-	handler, ok := r.hosts[name]
+	handler, ok := r.Hosts[name]
 
 	if !ok {
 		log.Printf("function not found: %s", name)

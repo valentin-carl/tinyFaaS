@@ -22,7 +22,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var Config util.Config
+var Config util.Config // todo
 
 const (
 	RProxyListenAddress = ""
@@ -174,11 +174,12 @@ func main() {
 	r.HandleFunc("/wipe", s.wipeHandler)
 	r.HandleFunc("/logs", s.logsHandler)
 	r.HandleFunc("/uploadURL", s.urlUploadHandler)
-	r.HandleFunc("/register", s.register) // todo rename registerHandler
-	r.HandleFunc("/listnodes", s.listNodesHandler)
-	r.HandleFunc("/echo", s.echoHandler)
-	r.HandleFunc("/pingnodes", s.pingNodes)
-	r.HandleFunc("/deletenode", s.deleteNode)
+	r.HandleFunc("/register", s.registerHandler)   // todo /cluster/registernode
+	r.HandleFunc("/listnodes", s.listNodesHandler) // todo /cluster/list
+	r.HandleFunc("/echo", s.echoHandler)           // todo /cluster/echo
+	r.HandleFunc("/pingnodes", s.pingNodes)        // todo /cluster/health
+	r.HandleFunc("/deletenode", s.deleteNode)      // todo /cluster/deletenode
+	// todo /cluster/deletefunction
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -437,7 +438,7 @@ func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
 // The request needs a header `endpoint`, which will be stored and used to
 // communicate with the to-be-registered node.
 // todo it might be better if the data is sent in the request body
-func (s *server) register(w http.ResponseWriter, r *http.Request) {
+func (s *server) registerHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("New register request")
 
@@ -589,6 +590,8 @@ func (s *server) deleteNode(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+
+	log.Println(r.Header, r.Method)
 
 	// read relevant headers
 	ip := r.Header.Get("nodeip")

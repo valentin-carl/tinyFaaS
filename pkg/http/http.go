@@ -1,9 +1,11 @@
 package http
 
 import (
+	"github.com/OpenFogStack/tinyFaaS/pkg/cluster"
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/OpenFogStack/tinyFaaS/pkg/rproxy"
 )
@@ -31,7 +33,19 @@ func Start(r *rproxy.RProxy, listenAddr string) {
 			return
 		}
 
-		s, res := r.Call(p, req_body, async)
+		// TODO this is the place to call the "clusterCall" function
+		backend, ok := os.LookupEnv("TF_BACKEND")
+		var (
+			s   rproxy.Status
+			res []byte
+		)
+		if ok && backend == "cluster" {
+			// use clusterproxy to forward calls to other nodes
+			s, res = cluster.Call(req, 5, async, r.Hosts)
+		} else {
+			// use normal rproxy to execute calls locally
+			s, res = r.Call(p, req_body, async)
+		}
 
 		switch s {
 		case rproxy.StatusOK:

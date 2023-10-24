@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"slices"
 	"sync"
@@ -17,6 +18,10 @@ type Node struct {
 	Ip          string `json:"ip"`
 	ManagerPort int    `json:"manager_port"` // todo is this used anywhere? if not, delete it
 	RproxyPort  int    `json:"rproxy_port"`  // todo is this used anywhere? if not, delete it
+}
+
+func (n *Node) String() string {
+	return fmt.Sprintf(`{"nodeip": "%s", "managerPort": "%d", "RproxyPort": "%d"}`, n.Ip, n.ManagerPort, n.RproxyPort)
 }
 
 func NewNode(ip string, managerPort, rproxyPort int) *Node {
