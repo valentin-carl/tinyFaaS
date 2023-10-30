@@ -67,6 +67,12 @@ func main() {
 
 	server := http.NewServeMux()
 
+	// todo remove
+	server.HandleFunc("/test", func(w http.ResponseWriter, req *http.Request) {
+		w.WriteHeader(200)
+		req.Body.Close()
+	})
+
 	// this is used when the manager tells the rproxy about a new function
 	server.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		if req.Method != "POST" {

@@ -1,12 +1,15 @@
 package cluster
 
 import (
-	"context"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"github.com/OpenFogStack/tinyFaaS/pkg/rproxy"
 	"io"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -18,8 +21,6 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 	client := http.Client{
 		Timeout: time.Duration(timeout) * time.Second,
 	}
-	req := r.Clone(context.Background())
-	defer req.Body.Close()
 
 	// get nodes
 	nodes := getShuffledNodes()
@@ -33,7 +34,16 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 			log.Printf("picked node %s", node.String())
 
 			// send request
-			res, err := client.Do(req)
+			url := fmt.Sprintf(`http://%s:%d%s`, node.Ip, node.RproxyPort, r.URL.Path)
+			log.Printf("trying to call node with request url %s", url)
+			tmp, err := io.ReadAll(r.Body)
+			if err != nil {
+				panic(err)
+			}
+			log.Println(len(tmp))
+			res, err := forwardRequest(r, url, &client, tmp)
+			log.Println(res.StatusCode)
+
 			if err != nil {
 				// request didn't go through
 				log.Printf("error sending request %s, trying different node if one is available", err.Error())
@@ -89,9 +99,59 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 }
 
 func getShuffledNodes() []Node {
-	nodes := GetNodes()
+
+	// problem: the rproxy and manager are seperate programs
+	// hence, they don't access the same nodes slices
+	// solution: if this function is called by the rproxy,
+	// send request to manager/listnodes and get the data from there
+
+	// this assumes that the manager and rproxy are running on the same host
+	// get all currently registered nodes from the local manager
+	mport := os.Getenv("CONFIG_PORT")
+	if mport == "" {
+		log.Println("could not get managerport, defaulting to 8080")
+		mport = "8080"
+	}
+	url := fmt.Sprintf("http://localhost:%s/listnodes", mport)
+	res, err := http.Get(url)
+	if err != nil {
+		log.Println("error while getting nodes from manager", err.Error())
+		return nil
+	}
+	resBody, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Println("error while trying to read response body")
+		return nil
+	}
+	var nodes []Node
+	err = json.Unmarshal(resBody, &nodes)
+	if err != nil {
+		log.Println("error while trying to unmarshall reponse body")
+		return nil
+	}
+	log.Printf(`"getShuffledNodes" got %d nodes %p`, len(nodes), &nodes)
+
+	// suffle nodes and return
 	rand.Shuffle(len(nodes), func(i, j int) {
 		nodes[i], nodes[j] = nodes[j], nodes[i]
 	})
 	return nodes
+}
+
+func forwardRequest(r *http.Request, url string, client *http.Client, body []byte) (*http.Response, error) {
+
+	// this function is required because the request object the server receives cannot be sent again
+	// solution: create a manual copy and send that to the target
+
+	log.Printf(`forwarding request with body "%s"`, string(body))
+
+	// create new request
+	req, err := http.NewRequest(r.Method, url, bytes.NewReader(body))
+	if err != nil {
+		log.Printf("error creating new request")
+		return nil, err
+	}
+
+	// send request to forwarding target and return result
+	return client.Do(req)
 }

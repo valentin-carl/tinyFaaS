@@ -25,16 +25,10 @@ func Start(r *rproxy.RProxy, listenAddr string) {
 
 		log.Printf("have request for path: %s (async: %v)", p, async)
 
-		req_body, err := io.ReadAll(req.Body)
-
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			log.Print(err)
-			return
-		}
-
 		// TODO this is the place to call the "clusterCall" function
 		backend, ok := os.LookupEnv("TF_BACKEND")
+		log.Println("BACKEND =", backend)
+		ok = true
 		var (
 			s   rproxy.Status
 			res []byte
@@ -44,6 +38,12 @@ func Start(r *rproxy.RProxy, listenAddr string) {
 			s, res = cluster.Call(req, 5, async, r.Hosts)
 		} else {
 			// use normal rproxy to execute calls locally
+			req_body, err := io.ReadAll(req.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				log.Print(err)
+				return
+			}
 			s, res = r.Call(p, req_body, async)
 		}
 

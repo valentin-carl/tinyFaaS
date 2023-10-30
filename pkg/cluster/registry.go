@@ -16,8 +16,8 @@ var lock = &sync.Mutex{}
 
 type Node struct {
 	Ip          string `json:"ip"`
-	ManagerPort int    `json:"manager_port"` // todo is this used anywhere? if not, delete it
-	RproxyPort  int    `json:"rproxy_port"`  // todo is this used anywhere? if not, delete it
+	ManagerPort int    `json:"manager_port"`
+	RproxyPort  int    `json:"rproxy_port"`
 }
 
 func (n *Node) String() string {
