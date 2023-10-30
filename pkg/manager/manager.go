@@ -138,6 +138,7 @@ func (ms *ManagementService) createFunction(name string, env string, threads int
 	fh, err := ms.backend.Create(name, env, threads, p, envs)
 
 	if err != nil {
+		log.Println("backend threw error")
 		return "", err
 	}
 
@@ -161,6 +162,7 @@ func (ms *ManagementService) createFunction(name string, env string, threads int
 
 	b, err := json.Marshal(d)
 	if err != nil {
+		log.Println("error, returning")
 		return "", err
 	}
 

@@ -88,7 +88,6 @@ func main() {
 	id := uuid.New().String()
 
 	// find backend
-	// todo figure out why this doesnt see the value i set
 	backend, ok := os.LookupEnv("TF_BACKEND")
 
 	if !ok {
@@ -96,7 +95,6 @@ func main() {
 		log.Println("using default backend docker")
 	}
 
-	backend = "cluster"
 	log.Println("backend =", backend)
 
 	var tfBackend manager.Backend
@@ -104,7 +102,6 @@ func main() {
 	case "docker":
 		log.Println("using docker backend")
 		tfBackend = docker.New(id)
-		// TODO add cluster backend
 	case "cluster":
 		log.Println("using cluster backend")
 		tfBackend = cluster.New(id)
@@ -174,12 +171,12 @@ func main() {
 	r.HandleFunc("/wipe", s.wipeHandler)
 	r.HandleFunc("/logs", s.logsHandler)
 	r.HandleFunc("/uploadURL", s.urlUploadHandler)
-	r.HandleFunc("/register", s.registerHandler)   // todo /cluster/registernode
-	r.HandleFunc("/listnodes", s.listNodesHandler) // todo /cluster/list
-	r.HandleFunc("/echo", s.echoHandler)           // todo /cluster/echo
-	r.HandleFunc("/pingnodes", s.pingNodes)        // todo /cluster/health
-	r.HandleFunc("/deletenode", s.deleteNode)      // todo /cluster/deletenode
-	// todo /cluster/deletefunction
+	// cluster api
+	r.HandleFunc("/cluster/register", s.registerHandler) // register a new node
+	r.HandleFunc("/cluster/list", s.listNodesHandler)    // list all registered nodes
+	r.HandleFunc("/cluster/echo", s.echoHandler)         // ping a node's manager (for /cluster/health)
+	r.HandleFunc("/cluster/health", s.pingNodes)         // ping all registered nodes and measure response time
+	r.HandleFunc("/cluster/delete", s.deleteNode)        // delete a node
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
@@ -277,7 +274,10 @@ func (s *server) uploadHandler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// delete a function (not node!)
 func (s *server) deleteHandler(w http.ResponseWriter, r *http.Request) {
+
+	// validate request
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -287,7 +287,6 @@ func (s *server) deleteHandler(w http.ResponseWriter, r *http.Request) {
 	d := struct {
 		FunctionName string `json:"name"`
 	}{}
-
 	err := json.NewDecoder(r.Body).Decode(&d)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
@@ -297,13 +296,50 @@ func (s *server) deleteHandler(w http.ResponseWriter, r *http.Request) {
 
 	log.Println("got request to delete function:", d.FunctionName)
 
-	// delete function
-	err = s.ms.Delete(d.FunctionName)
+	// for cluster mode
+	if be := os.Getenv("TF_BACKEND"); be == "cluster" {
 
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Println(err)
-		return
+		log.Println("delete: entered cluster mode delete version")
+		client := http.Client{}
+
+		// send delete request to all registered nodes
+		for _, node := range cluster.GetNodes() {
+
+			log.Printf("sending request to delete %s to %s:%d", d.FunctionName, node.Ip, node.ManagerPort)
+
+			url := fmt.Sprintf("http://%s:%d/delete", node.Ip, node.ManagerPort)
+			b, err := json.Marshal(d)
+			if err != nil {
+				log.Printf("could not marshall function name")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+
+			r, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+			if err != nil {
+				log.Printf("error creating new request")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			res, err := client.Do(r)
+			if err != nil || res.StatusCode != http.StatusOK {
+				log.Printf("error sending request or status not ok")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			log.Println(res.StatusCode)
+		}
+
+	} else {
+		// docker mode
+		// delete function
+		err = s.ms.Delete(d.FunctionName)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Println(err)
+			return
+		}
 	}
 
 	// return success
@@ -325,20 +361,46 @@ func (s *server) listHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// removes all functions
 func (s *server) wipeHandler(w http.ResponseWriter, r *http.Request) {
+
+	// validate request
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
 
-	err := s.ms.Wipe()
-
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		log.Println(err)
-		return
+	// cluster mode
+	if be := os.Getenv("TF_BACKEND"); be == "cluster" {
+		client := http.Client{}
+		for _, node := range cluster.GetNodes() {
+			// create request
+			url := fmt.Sprintf("http://%s:%d/wipe", node.Ip, node.ManagerPort)
+			req, err := http.NewRequest(http.MethodPost, url, nil)
+			if err != nil {
+				fmt.Println("error creating request")
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			// perform request
+			res, err := client.Do(req)
+			if err != nil || res.StatusCode != http.StatusOK {
+				log.Printf("error sending request %d", res.StatusCode)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			log.Printf("telling %s:%d to wipe res %d", node.Ip, node.ManagerPort, res.StatusCode)
+		}
+	} else {
+		// docker mode
+		// tell local to remove all functions
+		err := s.ms.Wipe()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Println(err)
+			return
+		}
 	}
-
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -388,6 +450,43 @@ func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusBadRequest)
 		return
+	}
+
+	// todo check out what the local case returns in response body and maybe do something similar
+	if be := os.Getenv("TF_BACKEND"); be == "cluster" {
+
+		// read request body
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			log.Printf("error reading request body %s", err.Error())
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+		client := http.Client{}
+
+		for _, node := range cluster.GetNodes() {
+
+			// make request
+			url := fmt.Sprintf("http://%s:%d/uploadURL", node.Ip, node.ManagerPort)
+			req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+			if err != nil {
+				log.Println("error creating request", err.Error())
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+
+			// send it
+			res, err := client.Do(req)
+			if err != nil || res.StatusCode != http.StatusOK {
+				log.Printf("error sending request to %s:%d %s", node.Ip, node.ManagerPort, err.Error())
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+		}
+
+		w.WriteHeader(http.StatusOK)
+		return // end function here if in cluster mode
 	}
 
 	// parse request
@@ -473,10 +572,22 @@ func (s *server) registerHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO check whether actual tinyfaas node
+	// check whether its an actual tinyfaas node
+	// try /echo endpoint => if correct response comes back, it's probably another TF node
+	res, err := http.Post(fmt.Sprintf("http://%s:%s/cluster/echo", ip, managerPort), "text/plain", strings.NewReader("hello world"))
+	log.Println(err.Error())
+	if err != nil || res.StatusCode != http.StatusOK {
+		w.WriteHeader(http.StatusBadRequest)
+		sc := -1
+		if res != nil {
+			sc = res.StatusCode
+		}
+		log.Printf("could not confirm %s:%s is a tinyfaas node %d %s", ip, managerPort, sc, err.Error())
+		return
+	}
 
 	// store node info
-	err := cluster.Register(ip, mp, rp)
+	err = cluster.Register(ip, mp, rp)
 	if err != nil {
 		log.Println("Node already registered")
 		w.WriteHeader(http.StatusForbidden)
@@ -492,6 +603,10 @@ func (s *server) registerHandler(w http.ResponseWriter, r *http.Request) {
 func (s *server) listNodesHandler(w http.ResponseWriter, r *http.Request) {
 
 	nodes := cluster.GetNodes()
+	log.Printf("%p %d", nodes, len(nodes))
+
+	log.Printf(`"listNodesHandler" got %d nodes`, len(nodes))
+
 	msg, err := json.Marshal(nodes)
 	log.Printf("nodes: %s\n", msg)
 	if err != nil {
@@ -541,7 +656,7 @@ func (s *server) pingNodes(w http.ResponseWriter, r *http.Request) {
 		Timeout: time.Duration(timeoutInt) * time.Second,
 	}
 	for _, node := range nodes {
-		url := fmt.Sprintf("http://%s:%d/echo", node.Ip, node.ManagerPort)
+		url := fmt.Sprintf("http://%s:%d/cluster/echo", node.Ip, node.ManagerPort)
 		log.Printf("sending ping to %s", url)
 		req, err := http.NewRequest(http.MethodPost, url, strings.NewReader("hello world"))
 		if err != nil {
