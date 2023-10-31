@@ -10,9 +10,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
-	"regexp"
-	"strings"
 )
 
 // handles instances of a single function across multiple TF nodes
@@ -106,33 +103,39 @@ func (ch *clusterHandler) Destroy() error {
 func (ch *clusterHandler) Logs() (io.Reader, error) {
 
 	var logs bytes.Buffer
+	c := http.Client{}
+	n := GetNodes()
+	all := make(map[Node][]byte)
 
-	for _, ip := range ch.nodes {
-		// request logs from node
-		// TODO this assumes that all tinyfaas nodes have the same ports config, which doesn't need to be true
-		managementPort := os.Getenv("CONFIG_PORT")
-		if managementPort == "" {
-			return nil, errors.New("Could not get the management service's port.")
-		}
-		res, err := http.Get(fmt.Sprintf("http://%s:%d/logs", ip, managementPort))
+	// request logs from all nodes
+	// TODO what if one doesnt reply
+	for _, node := range n {
+		url := fmt.Sprintf("http://%s:%d/logs?name=%s", node.Ip, node.ManagerPort, ch.functionName)
+		r, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
+			log.Printf("error building request %s", err.Error())
 			return nil, err
 		}
-
-		// read response into string slice
-		resContents, err := io.ReadAll(res.Body)
+		res, err := c.Do(r)
 		if err != nil {
+			log.Printf("error performing request %d %s", res.StatusCode, err.Error())
 			return nil, err
 		}
-		bodyStr := string(resContents)
-		bodyStr = strings.TrimSpace(bodyStr)
-		lines := strings.Split(bodyStr, "\n")
+		b, err := io.ReadAll(res.Body)
+		if err != nil {
+			log.Printf("error reading result body %s", err.Error())
+			return nil, err
+		}
+		all[node] = b
+	}
 
-		// filter lines by function name
-		for _, line := range lines {
-			if match, _ := regexp.MatchString(fmt.Sprintf("function=%s", ch.functionName), line); match {
-				logs.WriteString(fmt.Sprintf("%s\n", line))
-			}
+	// put it all in the buffer
+	for _, b := range all {
+		nw, err := io.WriteString(&logs, string(b))
+		log.Printf("%d bytes written", nw)
+		if err != nil {
+			log.Printf("error writing to logs buffer %s", err.Error())
+			return nil, err
 		}
 	}
 

@@ -406,6 +406,8 @@ func (s *server) wipeHandler(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) logsHandler(w http.ResponseWriter, r *http.Request) {
 
+	log.Println("fetching logs")
+
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -415,7 +417,12 @@ func (s *server) logsHandler(w http.ResponseWriter, r *http.Request) {
 	var logs io.Reader
 	name := r.URL.Query().Get("name")
 
+	log.Printf("name = %s", name)
+
 	if name == "" {
+
+		log.Println("no function name specified")
+
 		l, err := s.ms.Logs()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -426,24 +433,34 @@ func (s *server) logsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if name != "" {
+
+		log.Printf("name %s specified, trying to get logs", name)
+
 		l, err := s.ms.LogsFunction(name)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Println(err)
 			return
 		}
+
 		logs = l
+	} else {
+		// if the name parameter is missing, no logs were requested
+		log.Println("no function requested, query parameters missing")
+		w.WriteHeader(http.StatusBadRequest)
+		return
 	}
 
 	// return success
 	w.WriteHeader(http.StatusOK)
 	// w.Header().Set("Content-Type", "text/plain")
-	_, err := io.Copy(w, logs)
+	n, err := io.Copy(w, logs)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Println(err)
 		return
 	}
+	log.Printf("%d bytes written", n)
 }
 
 func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
@@ -469,7 +486,7 @@ func (s *server) urlUploadHandler(w http.ResponseWriter, r *http.Request) {
 
 			// make request
 			url := fmt.Sprintf("http://%s:%d/uploadURL", node.Ip, node.ManagerPort)
-			req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b))
+			req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(b)) // todo do I have to close this??
 			if err != nil {
 				log.Println("error creating request", err.Error())
 				w.WriteHeader(http.StatusInternalServerError)
