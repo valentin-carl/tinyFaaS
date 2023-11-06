@@ -187,12 +187,19 @@ docker run --env COAP_PORT=6000 --env GRPC_PORT=-1 -v /var/run/docker.sock:/var/
 
 ### Running a TinyFaaS Cluster
 
-- Tell TF to use the cluster backend instead of docker
-```shell
-export TF_BACKEND=cluster
-```
+TinyFaaS can also be run in a cluster. In the cluster, there is one leader that acts as a loadbalancer. Other nodes can 
+be registered at the leader. When starting, tinyFaaS is looking for the environment variable `TF_BACKEND`. If it is set
+to `docker` or left empty (i.e., not set), tinyFaaS will default to the non-cluster mode. Setting it to `cluster` will
+turn the node into a cluster leader. There is no additional setup for the non-leader nodes; hence, `TF_BACKEND` does not
+need to be set there.
 
-- Add nodes to cluster
+#### API
 
-Caveats
-- When writing a function, dont use subdirectories (or rewrite the zip function 😃)
+- `/cluster/register` is used to register a node at the leader. It expects the following headers.
+  - `nodeip` 
+  - `managerport` (8080 by default)
+  - `rproxyport` (8000 by default)
+- `/cluster/list` returns a list of all registered nodes and requires no additional information.
+- `/cluster/echo` is used to ping the node and check whether it responds.
+- `/cluster/health` pings all registered nodes and returns their response time to the leader/an error if it did not respond.
+- `/cluster/delete` unregisters a node from the leader.
