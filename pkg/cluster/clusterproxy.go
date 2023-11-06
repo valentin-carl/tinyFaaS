@@ -23,7 +23,7 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 	}
 
 	// get nodes
-	nodes := getShuffledNodes()
+	nodes := getShuffledNodes() // TODO this might be nil
 	log.Printf("clusterproxy got %d nodes to try", len(nodes))
 
 	handle := func() (rproxy.Status, []byte) {
@@ -42,12 +42,12 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 			}
 			log.Println(len(tmp))
 			res, err := forwardRequest(r, url, &client, tmp)
-			log.Println(res.StatusCode)
 
 			if err != nil {
 				// request didn't go through
 				log.Printf("error sending request %s, trying different node if one is available", err.Error())
 			} else {
+				log.Println(res.StatusCode) // this used to cause a null pointer exception, was before the if statement
 				// request went through
 				// read response
 				resBody, err := io.ReadAll(res.Body)
@@ -112,7 +112,7 @@ func getShuffledNodes() []Node {
 		log.Println("could not get managerport, defaulting to 8080")
 		mport = "8080"
 	}
-	url := fmt.Sprintf("http://localhost:%s/listnodes", mport)
+	url := fmt.Sprintf("http://localhost:%s/cluster/list", mport)
 	res, err := http.Get(url)
 	if err != nil {
 		log.Println("error while getting nodes from manager", err.Error())
@@ -143,7 +143,7 @@ func forwardRequest(r *http.Request, url string, client *http.Client, body []byt
 	// this function is required because the request object the server receives cannot be sent again
 	// solution: create a manual copy and send that to the target
 
-	log.Printf(`forwarding request with body "%s"`, string(body))
+	log.Printf(`forwarding request with body %s to %s`, string(body), url)
 
 	// create new request
 	req, err := http.NewRequest(r.Method, url, bytes.NewReader(body))
