@@ -202,4 +202,4 @@ need to be set there.
 - `/cluster/list` returns a list of all registered nodes and requires no additional information.
 - `/cluster/echo` is used to ping the node and check whether it responds.
 - `/cluster/health` pings all registered nodes and returns their response time to the leader/an error if it did not respond.
-- `/cluster/delete` unregisters a node from the leader.
+- `/cluster/delete` unregisters a node from the leader. It expects the same headers as `/cluster/register`
