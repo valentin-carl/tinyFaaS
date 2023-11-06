@@ -591,7 +591,7 @@ func (s *server) registerHandler(w http.ResponseWriter, r *http.Request) {
 
 	// check whether its an actual tinyfaas node
 	// try /echo endpoint => if correct response comes back, it's probably another TF node
-	res, err := http.Post(fmt.Sprintf("http://%s:%s/cluster/echo", ip, managerPort), "text/plain", strings.NewReader("hello world"))
+	/*res, err := http.Post(fmt.Sprintf("http://%s:%s/cluster/echo", ip, managerPort), "text/plain", strings.NewReader("hello world"))
 	log.Println(err.Error())
 	if err != nil || res.StatusCode != http.StatusOK {
 		w.WriteHeader(http.StatusBadRequest)
@@ -601,7 +601,7 @@ func (s *server) registerHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("could not confirm %s:%s is a tinyfaas node %d %s", ip, managerPort, sc, err.Error())
 		return
-	}
+	}*/
 
 	// store node info
 	err = cluster.Register(ip, mp, rp)
