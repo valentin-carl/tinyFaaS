@@ -604,7 +604,7 @@ func (s *server) registerHandler(w http.ResponseWriter, r *http.Request) {
 	}*/
 
 	// store node info
-	err = cluster.Register(ip, mp, rp)
+	err := cluster.Register(ip, mp, rp)
 	if err != nil {
 		log.Println("Node already registered")
 		w.WriteHeader(http.StatusForbidden)
