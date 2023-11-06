@@ -22,6 +22,12 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 		Timeout: time.Duration(timeout) * time.Second,
 	}
 
+	// get the request body
+	rB, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Println("couldnt read request body", err.Error())
+	}
+
 	// get nodes
 	nodes := getShuffledNodes() // TODO this might be nil
 	log.Printf("clusterproxy got %d nodes to try", len(nodes))
@@ -36,12 +42,8 @@ func Call(r *http.Request, timeout int, async bool, registeredFunctions map[stri
 			// send request
 			url := fmt.Sprintf(`http://%s:%d%s`, node.Ip, node.RproxyPort, r.URL.Path)
 			log.Printf("trying to call node with request url %s", url)
-			tmp, err := io.ReadAll(r.Body)
-			if err != nil {
-				panic(err)
-			}
-			log.Println(len(tmp))
-			res, err := forwardRequest(r, url, &client, tmp)
+			log.Println(len(rB))
+			res, err := forwardRequest(r, url, &client, rB)
 
 			if err != nil {
 				// request didn't go through
